@@ -1,5 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:shopping_app/data/categories.dart';
+
 import 'package:shopping_app/models/grocery_item.dart';
+import 'package:shopping_app/widgets/credentials.dart';
 import 'package:shopping_app/widgets/new_item.dart';
 
 class GroceryList extends StatefulWidget {
@@ -10,7 +16,52 @@ class GroceryList extends StatefulWidget {
 }
 
 class _GroceryListState extends State<GroceryList> {
-  final List<GroceryItem> _groceryItems = [];
+  List<GroceryItem> _groceryItems = [];
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadItems();
+  }
+
+  void _loadItems() async {
+    final url = baseUrl;
+    try {
+      final response = await http.get(url);
+      if (response.body == 'null') {
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+      print(response.body);
+      final Map<String, dynamic> resData = jsonDecode(response.body);
+      List<GroceryItem> loadedList = [];
+      for (final item in resData.entries) {
+        final category = categories.entries
+            .firstWhere(
+                (element) => item.value['category'] == element.value.name)
+            .value;
+        loadedList.add(
+          GroceryItem(
+              id: item.key,
+              name: item.value['name'],
+              quantity: item.value['quantity'],
+              category: category),
+        );
+      }
+      setState(() {
+        _groceryItems = loadedList;
+      });
+    } catch (e) {
+      _error = 'Failed to fetch data!';
+    }
+    setState(() {
+      _isLoading = false;
+    });
+  }
 
   void _addItem() async {
     final newItem = await Navigator.push<GroceryItem>(context,
@@ -25,6 +76,22 @@ class _GroceryListState extends State<GroceryList> {
     });
   }
 
+  void _removeItem(int index) {
+    final url = getDeleteUrl(_groceryItems[index].id);
+    try {
+      http.delete(url);
+      setState(() {
+        _groceryItems.remove(_groceryItems[index]);
+      });
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Item has been removed!"),
+        ),
+      );
+    } catch (e) {}
+  }
+
   @override
   Widget build(BuildContext context) {
     Widget content = ListView.builder(
@@ -33,13 +100,7 @@ class _GroceryListState extends State<GroceryList> {
           return Dismissible(
             key: ValueKey(_groceryItems[index]),
             onDismissed: (direction) {
-              _groceryItems.remove(_groceryItems[index]);
-              ScaffoldMessenger.of(context).clearSnackBars();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text("Item has been removed!"),
-                ),
-              );
+              _removeItem(index);
             },
             background: Container(
               color: Colors.redAccent,
@@ -70,7 +131,18 @@ class _GroceryListState extends State<GroceryList> {
             ),
           );
         });
-    if (_groceryItems.isEmpty) {
+
+    if (_error != null) {
+      content = Center(
+        child: Text(
+          _error!,
+        ),
+      );
+    } else if (_isLoading) {
+      content = const Center(
+        child: CircularProgressIndicator(),
+      );
+    } else if (_groceryItems.isEmpty) {
       content = const Center(
         child: Text(
           "Nothing in the card! Add something.",
